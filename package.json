@@ -1,0 +1,21 @@
+{
+  "name": "apex-stock-market",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/common",
+    "packages/api",
+    "packages/services/*",
+    "packages/web"
+  ],
+  "scripts": {
+    "predev": "npm run build -w @apex/common",
+    "dev": "concurrently -k -n gateway,auth,user,stock,market,portfolio,order,watchlist,notification,analytics,realtime,web -c cyan,magenta,blue,yellow,green,cyan,red,magenta,blue,yellow,green,white \"npm run dev -w @apex/gateway\" \"npm run dev -w @apex/auth-service\" \"npm run dev -w @apex/user-service\" \"npm run dev -w @apex/stock-service\" \"npm run dev -w @apex/market-data-service\" \"npm run dev -w @apex/portfolio-service\" \"npm run dev -w @apex/order-service\" \"npm run dev -w @apex/watchlist-service\" \"npm run dev -w @apex/notification-service\" \"npm run dev -w @apex/analytics-service\" \"npm run dev -w @apex/realtime-service\" \"npm run dev -w @apex/web\"",
+    "build": "npm run build -w @apex/common && npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck -w @apex/common && npm run typecheck --workspaces --if-present",
+    "start": "npm run start -w @apex/gateway"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

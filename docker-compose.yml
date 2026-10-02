@@ -1,0 +1,262 @@
+x-service-dependencies: &service-dependencies
+  database:
+    condition: service_healthy
+  kafka:
+    condition: service_healthy
+
+x-service-environment: &service-environment
+  MYSQL_HOST: database
+  MYSQL_PORT: 3306
+  DB_PASSWORD: apex-service-dev-password
+  KAFKA_BROKERS: kafka:9092
+  JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-dev-access-secret-replace-before-deploy-9ff85b1b}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-local-dev-refresh-secret-replace-before-deploy-a311d90c}
+
+services:
+  database:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local-root-password}
+      MYSQL_DATABASE: apex_market
+      MYSQL_USER: apex_legacy
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local-root-password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init/01-service-databases.sql:/docker-entrypoint-initdb.d/01-service-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic apex.domain.events.v1 --partitions 1 --replication-factor 1 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/auth-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: auth-service
+      SERVICE_PORT: 4201
+      DB_NAME: apex_auth
+      DB_USER: apex_auth
+      COOKIE_SECURE: "false"
+    depends_on: *service-dependencies
+
+  user-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/user-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: user-service
+      SERVICE_PORT: 4202
+      DB_NAME: apex_user
+      DB_USER: apex_user
+    depends_on: *service-dependencies
+
+  stock-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/stock-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: stock-service
+      SERVICE_PORT: 4203
+      DB_NAME: apex_stock
+      DB_USER: apex_stock
+    depends_on: *service-dependencies
+
+  market-data-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/market-data-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: market-data-service
+      SERVICE_PORT: 4204
+      DB_NAME: apex_market
+      DB_USER: apex_market
+      STOCK_SERVICE_URL: http://stock-service:4203
+      TWELVE_DATA_API_KEY: ${TWELVE_DATA_API_KEY:-}
+      MARKET_REFRESH_MS: ${MARKET_REFRESH_MS:-900000}
+      PROVIDER_REQUEST_DELAY_MS: ${PROVIDER_REQUEST_DELAY_MS:-8000}
+    depends_on:
+      <<: *service-dependencies
+      stock-service:
+        condition: service_started
+
+  portfolio-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/portfolio-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: portfolio-service
+      SERVICE_PORT: 4205
+      DB_NAME: apex_portfolio
+      DB_USER: apex_portfolio
+      PAPER_INITIAL_CASH: ${PAPER_INITIAL_CASH:-100000}
+    depends_on: *service-dependencies
+
+  order-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/order-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: order-service
+      SERVICE_PORT: 4206
+      DB_NAME: apex_order
+      DB_USER: apex_order
+      MARKET_DATA_URL: http://market-data-service:4204
+      PORTFOLIO_SERVICE_URL: http://portfolio-service:4205
+    depends_on:
+      <<: *service-dependencies
+      market-data-service:
+        condition: service_started
+      portfolio-service:
+        condition: service_started
+
+  watchlist-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/watchlist-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: watchlist-service
+      SERVICE_PORT: 4207
+      DB_NAME: apex_watchlist
+      DB_USER: apex_watchlist
+    depends_on: *service-dependencies
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/notification-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: notification-service
+      SERVICE_PORT: 4208
+      DB_NAME: apex_notification
+      DB_USER: apex_notification
+    depends_on: *service-dependencies
+
+  analytics-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/analytics-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: analytics-service
+      SERVICE_PORT: 4209
+      DB_NAME: apex_analytics
+      DB_USER: apex_analytics
+    depends_on: *service-dependencies
+
+  realtime-service:
+    build:
+      context: .
+      dockerfile: packages/services/Dockerfile
+      args: { SERVICE_PACKAGE: "@apex/realtime-service" }
+    restart: unless-stopped
+    environment:
+      <<: *service-environment
+      SERVICE_NAME: realtime-service
+      SERVICE_PORT: 4210
+    depends_on: *service-dependencies
+
+  gateway:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      GATEWAY_PORT: 4000
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-local-dev-access-secret-replace-before-deploy-9ff85b1b}
+      FRONTEND_ORIGINS: http://localhost:5173,http://localhost:8080
+      AUTH_SERVICE_URL: http://auth-service:4201
+      USER_SERVICE_URL: http://user-service:4202
+      STOCK_SERVICE_URL: http://stock-service:4203
+      MARKET_DATA_SERVICE_URL: http://market-data-service:4204
+      PORTFOLIO_SERVICE_URL: http://portfolio-service:4205
+      ORDER_SERVICE_URL: http://order-service:4206
+      WATCHLIST_SERVICE_URL: http://watchlist-service:4207
+      NOTIFICATION_SERVICE_URL: http://notification-service:4208
+      ANALYTICS_SERVICE_URL: http://analytics-service:4209
+      REALTIME_WS_URL: ws://realtime-service:4210
+    ports:
+      - "4110:4000"
+    depends_on:
+      auth-service: { condition: service_started }
+      user-service: { condition: service_started }
+      stock-service: { condition: service_started }
+      market-data-service: { condition: service_started }
+      portfolio-service: { condition: service_started }
+      order-service: { condition: service_started }
+      watchlist-service: { condition: service_started }
+      notification-service: { condition: service_started }
+      analytics-service: { condition: service_started }
+      realtime-service: { condition: service_started }
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - gateway
+
+volumes:
+  mysql-data:
+  kafka-data:

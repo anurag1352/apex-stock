@@ -1,0 +1,8 @@
+{
+  "name": "@apex/auth-service",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "dev": "ENV_FILE=../../../.env SERVICE_NAME=auth-service SERVICE_PORT=4201 DB_NAME=apex_auth DB_USER=apex_auth tsx watch src/index.ts", "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit -p tsconfig.json", "start": "ENV_FILE=../../../.env SERVICE_NAME=auth-service SERVICE_PORT=4201 DB_NAME=apex_auth DB_USER=apex_auth node dist/index.js" },
+  "dependencies": { "@apex/common": "1.0.0", "bcryptjs": "^2.4.3", "express": "^4.21.2" },
+  "devDependencies": { "@types/bcryptjs": "^2.4.6", "@types/express": "^4.17.21", "@types/node": "^22.10.5", "tsx": "^4.19.2", "typescript": "^5.7.2" }
+}
